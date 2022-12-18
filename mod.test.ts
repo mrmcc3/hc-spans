@@ -30,7 +30,7 @@ Deno.test({
 		z.number().positive().int().parse(s.startTime);
 		assert(s.startTime <= Date.now());
 		assertEquals(s.duration, undefined);
-		assertEquals(s.getTrace(), [s]);
+		assertEquals(s.spans, [s]);
 	},
 });
 
@@ -65,7 +65,26 @@ Deno.test({
 		z.number().positive().int().parse(s.startTime);
 		assert(s.startTime <= Date.now());
 		assertEquals(s.duration, undefined);
-		assertEquals(s.getTrace(), [s]);
+		assertEquals(s.spans, [s]);
+	},
+});
+
+Deno.test({
+	name: "create from parent span",
+	fn() {
+		const p = span.create({
+			service: "spans",
+			name: "span.parent",
+		});
+		assert(p);
+		const extra = { a: 1, b: "2", c: null, d: undefined, e: true };
+		const c = span.create({
+			parent: p,
+			name: "child",
+			extra,
+		});
+		assert(c);
+		assertEquals(c.spans, [p, c]);
 	},
 });
 
@@ -85,5 +104,45 @@ Deno.test({
 		span.restart(s);
 		assertEquals(s.duration, undefined);
 		assert(s.startTime > st);
+	},
+});
+
+Deno.test({
+	name: "end with extra data",
+	async fn() {
+		const s = span.create({
+			service: "spans",
+			name: "span.end",
+		});
+		assert(s);
+		await sleep(1);
+		const extra = { a: 1, b: null };
+		span.end(s, extra);
+		z.number().positive().parse(s.duration);
+		assertEquals(s.extra, extra);
+	},
+});
+
+Deno.test({
+	name: "propagate trace to headers",
+	fn() {
+		const s1 = span.create({
+			service: "spans",
+			name: "s1",
+		});
+		assert(s1);
+		const headers = new Headers();
+		span.propagate(s1, headers);
+		const s2 = span.create({
+			parent: new Request("http://localhost:3000", { headers }),
+			service: "spans",
+			name: "s2",
+		});
+		assert(s2);
+		assertEquals(s2.traceId, s1.traceId);
+		assertEquals(s2.parentId, s1.spanId);
+		assertEquals(s1.parentId, undefined);
+		assertEquals(s1.spans, [s1]);
+		assertEquals(s2.spans, [s2]);
 	},
 });
