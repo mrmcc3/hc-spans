@@ -169,7 +169,9 @@ Deno.test({
 		const extra = { e: 1 };
 		const s1 = span.create({ service: "spans", name: "s1", skip: true });
 		span.event({ name: "skip", parent: s1, extra });
-		span.link(s1, s1);
+		const s2 = span.create({ name: "child", parent: s1 });
+		span.link(s2, s1);
+		span.end(s2);
 		span.extra(s1, { e: 2 });
 		span.end(s1, { e: 3 });
 		assertEquals(s1, null);

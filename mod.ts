@@ -75,11 +75,11 @@ class Span {
 interface CreateArg extends CreateArgBase {
 	skip?: boolean;
 	service?: string;
-	parent?: Request | Span;
+	parent?: Request | Span | null;
 }
 
 export function create({ skip, name, service, parent, extra }: CreateArg): Span | null {
-	if (skip) return null; // short circuit
+	if (skip || (parent === null && !service)) return null; // short circuit
 	if (parent instanceof Span) {
 		return new Span({ kind: "span", name, parent, extra });
 	}
