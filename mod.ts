@@ -54,6 +54,22 @@ class Span {
 		}
 		this.spans.push(this);
 	}
+
+	hcJSON() {
+		return {
+			time: new Date(this.startTime).toISOString(),
+			data: {
+				service: this.service,
+				name: this.name,
+				startTime: this.startTime,
+				duration: this.duration,
+				spanId: this.spanId,
+				traceId: this.traceId,
+				parentId: this.parentId,
+				extra: this.extra,
+			},
+		};
+	}
 }
 
 interface CreateArg extends CreateArgBase {
@@ -74,18 +90,34 @@ export function create({ skip, name, service, parent, extra }: CreateArg): Span 
 	return new Span({ kind: "no-parent", name, service, extra });
 }
 
-export function restart(span: Span | null) {
-	if (!span) return null;
-	span.startTime = Date.now();
-	span.duration = undefined;
-	return span;
+interface EventArg extends CreateArgBase {
+	parent: Span | null;
 }
 
-export function end(span: Span | null, extra?: ExtraData) {
-	if (!span) return;
-	span.duration = Date.now() - span.startTime;
-	if (extra) span.extra = { ...span.extra, ...extra };
-	return span;
+export function event({ name, parent, extra }: EventArg) {
+	if (parent) {
+		new Span({
+			kind: "span",
+			name,
+			parent,
+			extra: { ...extra, annotationType: "span_event" },
+		});
+	}
+}
+
+export function link(parent: Span | null, to: Span | null) {
+	if (parent && to) {
+		new Span({
+			kind: "span",
+			name: "link",
+			parent,
+			extra: {
+				annotationType: "link",
+				linkSpanId: to.spanId,
+				linkTraceId: to.traceId,
+			},
+		});
+	}
 }
 
 export function propagate(span: Span | null, headers: Headers) {
@@ -94,4 +126,30 @@ export function propagate(span: Span | null, headers: Headers) {
 	headers.set("x-parent-id", span.spanId);
 }
 
-// spans -> honeycomb request
+export function extra(span: Span | null, extra: ExtraData) {
+	if (!span) return;
+	span.extra = { ...span.extra, ...extra };
+}
+
+export function end(span: Span | null, extra?: ExtraData) {
+	if (!span) return;
+	span.duration = Date.now() - span.startTime;
+	span.extra = { ...span.extra, ...extra };
+}
+
+interface HCReqArg {
+	dataset: string;
+	apiKey: string;
+	span: Span;
+}
+
+export function honeycombRequest({ dataset, apiKey, span }: HCReqArg) {
+	return new Request(`https://api.honeycomb.io/1/batch/${dataset}`, {
+		method: "POST",
+		headers: {
+			"X-Honeycomb-Team": apiKey,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify(span.spans.map((s) => s.hcJSON())),
+	});
+}
