@@ -157,10 +157,7 @@ export function honeycombRequest({ apiKey, span }: HCReqArg) {
 }
 
 export async function sendToHoneycomb({ apiKey, span }: HCReqArg) {
-	if (!span.spans.length) {
-		console.warn("nothing to send");
-		return;
-	}
+	if (!span.spans.length) return;
 	const res = await fetch(honeycombRequest({ apiKey, span }));
 	if (!res.ok) console.warn("failed to send spans to honeycomb");
 	return res;
