@@ -59,14 +59,14 @@ class Span {
 		return {
 			time: new Date(this.startTime).toISOString(),
 			data: {
-				service: this.service,
+				// https://docs.honeycomb.io/getting-data-in/tracing/send-trace-data/#opentelemetry
 				name: this.name,
-				startTime: this.startTime,
-				duration: this.duration,
-				spanId: this.spanId,
-				traceId: this.traceId,
-				parentId: this.parentId,
-				extra: this.extra,
+				"service.name": this.service,
+				duration_ms: this.duration,
+				"trace.span_id": this.spanId,
+				"trace.trace_id": this.traceId,
+				"trace.parent_id": this.parentId,
+				...this.extra,
 			},
 		};
 	}
@@ -84,6 +84,9 @@ export function create({ skip, name, service, parent, extra }: CreateArg): Span 
 		return new Span({ kind: "span", name, parent, extra });
 	}
 	if (!service) throw new Error("service must be provided when parent is not a span");
+	if (new URL(`http://localhost/${service}`).pathname.slice(1) !== service) {
+		console.warn("consider using a service name that is url friendly");
+	}
 	if (parent instanceof Request) {
 		return new Span({ kind: "request", name, service, parent, extra });
 	}
@@ -100,7 +103,7 @@ export function event({ name, parent, extra }: EventArg) {
 			kind: "span",
 			name,
 			parent,
-			extra: { ...extra, annotationType: "span_event" },
+			extra: { ...extra, "meta.annotation_type": "span_event" },
 		});
 	}
 }
@@ -112,9 +115,9 @@ export function link(parent: Span | null, to: Span | null) {
 			name: "link",
 			parent,
 			extra: {
-				annotationType: "link",
-				linkSpanId: to.spanId,
-				linkTraceId: to.traceId,
+				"meta.annotation_type": "link",
+				"trace.link.span_id": to.spanId,
+				"trace.link.trace_id": to.traceId,
 			},
 		});
 	}
@@ -138,16 +141,15 @@ export function end(span: Span | null, extra?: ExtraData) {
 }
 
 interface HCReqArg {
-	dataset: string;
 	apiKey: string;
 	span: Span;
 }
 
-export function honeycombRequest({ dataset, apiKey, span }: HCReqArg) {
-	return new Request(`https://api.honeycomb.io/1/batch/${dataset}`, {
+export function honeycombRequest({ apiKey, span }: HCReqArg) {
+	return new Request(`https://api.honeycomb.io/1/batch/${span.service}`, {
 		method: "POST",
 		headers: {
-			"X-Honeycomb-Team": apiKey,
+			"x-honeycomb-team": apiKey,
 			"content-type": "application/json",
 		},
 		body: JSON.stringify(span.spans.map((s) => s.hcJSON())),

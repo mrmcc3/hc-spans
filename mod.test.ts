@@ -137,7 +137,7 @@ Deno.test({
 		assertEquals(s2.parentId, s1.spanId);
 		assertEquals(s2.traceId, s1.traceId);
 		assertEquals(s2.service, s1.service);
-		assertEquals(s2.extra, { annotationType: "span_event", a: 1 });
+		assertEquals(s2.extra, { "meta.annotation_type": "span_event", a: 1 });
 	},
 });
 
@@ -156,9 +156,9 @@ Deno.test({
 		assertEquals(link.parentId, s1.spanId);
 		assertEquals(link.traceId, s1.traceId);
 		assertEquals(link.extra, {
-			annotationType: "link",
-			linkSpanId: s2.spanId,
-			linkTraceId: s2.traceId,
+			"meta.annotation_type": "link",
+			"trace.link.span_id": s2.spanId,
+			"trace.link.trace_id": s2.traceId,
 		});
 	},
 });
@@ -186,8 +186,13 @@ Deno.test({
 		span.event({ name: "e1", parent: s1, extra: { e: 1 } });
 		await sleep(1);
 		span.end(s1, { s: 1 });
-		const req = span.honeycombRequest({ dataset: "ds", apiKey: "key", span: s1 });
-		assertEquals(req.url, "https://api.honeycomb.io/1/batch/ds");
+		const req = span.honeycombRequest({ apiKey: "key", span: s1 });
+		assertEquals(
+			req.url,
+			new URL(
+				`https://api.honeycomb.io/1/batch/${s1.service}`,
+			).toString(),
+		);
 		assertEquals(req.headers.get("content-type"), "application/json");
 		assertEquals(req.headers.get("x-honeycomb-team"), "key");
 		assertEquals(req.bodyUsed, false);
@@ -197,26 +202,25 @@ Deno.test({
 				time: z.string().datetime(),
 				data: z.object({
 					name: z.literal("s1"),
-					service: z.literal("spans"),
-					startTime: z.number().positive().int(),
-					duration: z.number().positive().int(),
-					spanId: z.string().uuid(),
-					parentId: z.undefined(),
-					traceId: z.string().uuid(),
-					extra: z.object({ s: z.literal(1) }),
+					"service.name": z.literal("spans"),
+					duration_ms: z.number().positive().int(),
+					"trace.span_id": z.string().uuid(),
+					"trace.parent_id": z.undefined(),
+					"trace.trace_id": z.string().uuid(),
+					s: z.literal(1),
 				}),
 			}),
 			z.object({
 				time: z.string().datetime(),
 				data: z.object({
 					name: z.literal("e1"),
-					service: z.literal("spans"),
-					startTime: z.number().positive().int(),
-					duration: z.undefined(),
-					spanId: z.string().uuid(),
-					parentId: z.literal(s1.spanId),
-					traceId: z.literal(s1.traceId),
-					extra: z.object({ e: z.literal(1), annotationType: z.literal("span_event") }),
+					"service.name": z.literal("spans"),
+					duration_ms: z.undefined(),
+					"trace.span_id": z.string().uuid(),
+					"trace.parent_id": z.literal(s1.spanId),
+					"trace.trace_id": z.literal(s1.traceId),
+					e: z.literal(1),
+					"meta.annotation_type": z.literal("span_event"),
 				}),
 			}),
 		]).parse(data);
