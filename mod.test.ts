@@ -4,7 +4,7 @@ import {
 	assertNotEquals,
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import { z } from "https://deno.land/x/zod@v3.20.2/mod.ts";
-import * as span from "./mod.ts";
+import * as hc from "./mod.ts";
 
 const assertUUID = z.string().uuid().parse;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -12,8 +12,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 Deno.test({
 	name: "create",
 	fn() {
-		const s = span.create({ service: "spans", name: "span.create" });
-		assert(s);
+		const s = hc.create({ service: "spans", name: "span.create" });
 		assertEquals(s.service, "spans");
 		assertEquals(s.name, "span.create");
 		assertEquals(s.extra, undefined);
@@ -30,8 +29,9 @@ Deno.test({
 Deno.test({
 	name: "create skip",
 	fn() {
-		const s = span.create({ skip: true, service: "spans", name: "span.create" });
-		assertEquals(s, null);
+		const s = hc.create({ skip: true, service: "spans", name: "span.create" });
+		assertEquals(s.spans, []);
+		assertEquals(s.spanId, "skipped");
 	},
 });
 
@@ -42,13 +42,12 @@ Deno.test({
 		const headers = new Headers();
 		headers.set("x-trace-id", crypto.randomUUID());
 		headers.set("x-parent-id", crypto.randomUUID());
-		const s = span.create({
+		const s = hc.create({
 			service: "spans",
 			name: "span.create",
 			parent: new Request("http://localhost:3000", { headers }),
 			extra,
 		});
-		assert(s);
 		assertEquals(s.service, "spans");
 		assertEquals(s.name, "span.create");
 		assertEquals(s.extra, extra);
@@ -65,11 +64,9 @@ Deno.test({
 Deno.test({
 	name: "create from parent span",
 	fn() {
-		const p = span.create({ service: "spans", name: "span.parent" });
-		assert(p);
+		const p = hc.create({ service: "spans", name: "span.parent" });
 		const extra = { a: 1, b: "2", c: null, d: undefined, e: true };
-		const c = span.create({ parent: p, name: "child", extra });
-		assert(c);
+		const c = hc.create({ parent: p, name: "child", extra });
 		assertEquals(c.spans, [p, c]);
 	},
 });
@@ -77,11 +74,10 @@ Deno.test({
 Deno.test({
 	name: "end with extra data",
 	async fn() {
-		const s = span.create({ service: "spans", name: "span.end" });
-		assert(s);
+		const s = hc.create({ service: "spans", name: "span.end" });
 		await sleep(1);
 		const extra = { a: 1, b: null };
-		span.end(s, extra);
+		hc.end(s, extra);
 		z.number().positive().parse(s.duration);
 		assertEquals(s.extra, extra);
 	},
@@ -91,11 +87,9 @@ Deno.test({
 	name: "extra",
 	fn() {
 		const extra = { a: 1, b: null };
-		const s1 = span.create({ service: "spans", name: "s1", extra });
-		assert(s1);
-		const s2 = span.create({ service: "spans", name: "s2" });
-		assert(s2);
-		span.extra(s2, extra);
+		const s1 = hc.create({ service: "spans", name: "s1", extra });
+		const s2 = hc.create({ service: "spans", name: "s2" });
+		hc.extra(s2, extra);
 		assertEquals(s1.extra, s2.extra);
 	},
 });
@@ -103,16 +97,14 @@ Deno.test({
 Deno.test({
 	name: "propagate trace to headers",
 	fn() {
-		const s1 = span.create({ service: "spans", name: "s1" });
-		assert(s1);
+		const s1 = hc.create({ service: "spans", name: "s1" });
 		const headers = new Headers();
-		span.propagate(s1, headers);
-		const s2 = span.create({
+		hc.propagate(s1, headers);
+		const s2 = hc.create({
 			parent: new Request("http://localhost:3000", { headers }),
 			service: "spans",
 			name: "s2",
 		});
-		assert(s2);
 		assertEquals(s2.traceId, s1.traceId);
 		assertEquals(s2.parentId, s1.spanId);
 		assertEquals(s1.parentId, undefined);
@@ -125,11 +117,9 @@ Deno.test({
 	name: "span event",
 	fn() {
 		const extra = { a: 1 };
-		const s1 = span.create({ service: "spans", name: "s1" });
-		assert(s1);
-		span.event({ name: "e1", parent: null, extra });
+		const s1 = hc.create({ service: "spans", name: "s1" });
 		assertEquals(s1.spans, [s1]);
-		span.event({ name: "e2", parent: s1, extra });
+		hc.event({ name: "e2", parent: s1, extra });
 		const s2 = s1.spans.at(-1);
 		assert(s2);
 		assertEquals(s2.spans.length, 2);
@@ -144,11 +134,9 @@ Deno.test({
 Deno.test({
 	name: "links",
 	fn() {
-		const s1 = span.create({ service: "spans", name: "s1" });
-		assert(s1);
-		const s2 = span.create({ service: "spans", name: "s2" });
-		assert(s2);
-		span.link(s1, s2);
+		const s1 = hc.create({ service: "spans", name: "s1" });
+		const s2 = hc.create({ service: "spans", name: "s2" });
+		hc.link(s1, s2);
 		const link = s1.spans.at(-1);
 		assert(link);
 		assertEquals(s1.spans.length, 2);
@@ -164,29 +152,32 @@ Deno.test({
 });
 
 Deno.test({
-	name: "null",
+	name: "skip all",
 	fn() {
 		const extra = { e: 1 };
-		const s1 = span.create({ service: "spans", name: "s1", skip: true });
-		span.event({ name: "skip", parent: s1, extra });
-		const s2 = span.create({ name: "child", parent: s1 });
-		span.link(s2, s1);
-		span.end(s2);
-		span.extra(s1, { e: 2 });
-		span.end(s1, { e: 3 });
-		assertEquals(s1, null);
+		const s1 = hc.create({ service: "spans", name: "s1", skip: true });
+		hc.event({ name: "skip", parent: s1, extra });
+		const s2 = hc.create({ name: "child", parent: s1 });
+		hc.link(s2, s1);
+		hc.end(s2);
+		hc.extra(s1, { e: 2 });
+		hc.end(s1, { e: 3 });
+		assertEquals(s1.spans, []);
+		assertEquals(s1.spanId, "skipped");
+		assertEquals(s2.spans, []);
+		assertEquals(s1.spanId, "skipped");
 	},
 });
 
 Deno.test({
 	name: "honeycomb batch",
 	async fn() {
-		const s1 = span.create({ service: "spans", name: "s1" });
+		const s1 = hc.create({ service: "spans", name: "s1" });
 		assert(s1);
-		span.event({ name: "e1", parent: s1, extra: { e: 1 } });
+		hc.event({ name: "e1", parent: s1, extra: { e: 1 } });
 		await sleep(1);
-		span.end(s1, { s: 1 });
-		const req = span.honeycombRequest({ apiKey: "key", span: s1 });
+		hc.end(s1, { s: 1 });
+		const req = hc.honeycombRequest({ apiKey: "key", span: s1 });
 		assertEquals(
 			req.url,
 			new URL(
@@ -224,5 +215,17 @@ Deno.test({
 				}),
 			}),
 		]).parse(data);
+	},
+});
+
+function example(span: hc.Span) {
+	return span.name;
+}
+
+Deno.test({
+	name: "exported types",
+	fn() {
+		const s1 = hc.create({ service: "spans", name: "s1" });
+		assertEquals(example(s1), s1.name);
 	},
 });
